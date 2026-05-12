@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>家庭教育AI辅导</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-container">
+    <!-- 侧边栏 -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <span class="sidebar-logo">🧸</span>
+            <span class="sidebar-title">小熊老师</span>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <div class="menu-item active" onclick="showPage('chat')">
+                <span class="menu-icon">💬</span>
+                <span class="menu-text">AI对话</span>
+            </div>
+            <div class="menu-item" onclick="showPage('exam')">
+                <span class="menu-icon">📝</span>
+                <span class="menu-text">智能出题</span>
+            </div>
+            <div class="menu-item" onclick="showPage('photo')">
+                <span class="menu-icon">📷</span>
+                <span class="menu-text">拍照批改</span>
+            </div>
+            <div class="menu-item" onclick="showPage('wrong')">
+                <span class="menu-icon">❌</span>
+                <span class="menu-text">错题本</span>
+            </div>
+            <div class="menu-item" onclick="showPage('plan')">
+                <span class="menu-icon">📅</span>
+                <span class="menu-text">学习计划</span>
+            </div>
+            <div class="menu-item" onclick="showPage('diagnosis')">
+                <span class="menu-icon">📊</span>
+                <span class="menu-text">诊断报告</span>
+            </div>
+            <div class="menu-item" onclick="showPage('knowledge')">
+                <span class="menu-icon">📚</span>
+                <span class="menu-text">知识库</span>
+            </div>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <select class="child-selector" id="childSelect" onchange="switchChild(this.value)"><option value="1">大宝（高三）</option><option value="2">二宝（学前）</option></select>
+            <button class="btn-edit" onclick="showChildEditor()" style="margin-top:8px;width:100%;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.2);color:white;cursor:pointer;font-size:12px">⚙️ 编辑孩子信息</button>
+        </div>
+    </aside>
+    
+    <!-- 孩子信息编辑弹窗 -->
+    <div class="modal" id="childModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center">
+        <div style="background:white;border-radius:16px;padding:24px;width:90%;max-width:400px">
+            <h3 style="margin-bottom:16px;font-size:18px">📝 编辑孩子信息</h3>
+            <div class="form-group">
+                <label class="form-label">昵称</label>
+                <input type="text" class="form-input" id="editChildName" placeholder="例如：大宝">
+            </div>
+            <div class="form-group">
+                <label class="form-label">年级</label>
+                <select class="form-select" id="editChildGrade">
+                    <option value="小学一年级">一年级</option>
+                    <option value="小学二年级">二年级</option>
+                    <option value="小学三年级">三年级</option>
+                    <option value="小学四年级">四年级</option>
+                    <option value="小学五年级">五年级</option>
+                    <option value="小学六年级">六年级</option>
+                    <option value="初一">初一</option>
+                    <option value="初二">初二</option>
+                    <option value="初三">初三</option>
+                    <option value="高一">高一</option>
+                    <option value="高二">高二</option>
+                    <option value="高三">高三</option>
+                </select>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:20px">
+                <button class="btn btn-secondary" onclick="closeChildModal()" style="flex:1">取消</button>
+                <button class="btn btn-primary" onclick="saveChildInfo()" style="flex:1">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 侧边栏遮罩（移动端） -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    
+    <!-- 主内容区 -->
+    <main class="main-content">
+        <!-- 顶部栏 -->
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <button class="toggle-btn" onclick="toggleSidebar()">☰</button>
+                <h1 class="page-title" id="pageTitle">AI对话</h1>
+            </div>
+            <div class="top-bar-right">
+                <select class="model-select" id="modelSelect" onchange="switchModel(this.value)"><option value="qwen2.5:7b-instruct-q4_K_M">qwen2.5:7b-instruct-q4_K_M</option></select>
+            </div>
+        </header>
+        
+        <!-- 聊天页面 -->
+        <div class="page active" id="chatPage">
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message assistant">
+                        <div class="msg-avatar">🧸</div>
+                        <div class="msg-content">
+                            <div class="msg-bubble">你好！我是小熊老师🧸，有什么可以帮助你的吗？</div>
+                            <div class="msg-time">系统消息</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="input-area">
+                    <div class="input-wrapper">
+                        <button class="action-btn" onclick="showQuickActions()" style="width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--bg-main);cursor:pointer;font-size:20px" title="更多功能">+</button>
+                        <div class="input-box" style="flex:1">
+                            <textarea class="chat-input" id="chatInput" rows="1" placeholder="输入问题..." onkeydown="handleKeyDown(event)"></textarea>
+                            <div class="input-actions">
+                                <button class="action-btn" id="voiceBtn" onclick="toggleVoice()">🎤</button>
+                            </div>
+                        </div>
+                        <button class="action-btn primary" onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 快捷操作菜单 -->
+        <div id="quickActions" style="display:none;position:absolute;bottom:80px;left:20px;background:white;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:12px;z-index:20">
+            <div onclick="insertTemplate('出题')" style="padding:10px 16px;cursor:pointer;border-radius:8px">📝 出题</div>
+            <div onclick="insertTemplate('判题')" style="padding:10px 16px;cursor:pointer;border-radius:8px">📷 拍照判题</div>
+            <div onclick="insertTemplate('讲解')" style="padding:10px 16px;cursor:pointer;border-radius:8px">📚 知识讲解</div>
+            <div onclick="insertTemplate('计划')" style="padding:10px 16px;cursor:pointer;border-radius:8px">📅 学习计划</div>
+        </div>
+        
+        <!-- 出题页面 -->
+        <div class="page" id="examPage">
+            <div class="page-header">
+                <h2 class="page-title">智能出题</h2>
+                <p class="page-subtitle">根据年级和科目生成个性化练习题</p>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">出题设置</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+                    <div class="form-group">
+                        <label class="form-label">年级</label>
+                        <select class="form-select" id="examGrade">
+                            <option value="小学一年级">一年级</option>
+                            <option value="小学二年级">二年级</option>
+                            <option value="小学三年级">三年级</option>
+                            <option value="小学四年级">四年级</option>
+                            <option value="小学五年级">五年级</option>
+                            <option value="小学六年级">六年级</option>
+                            <option value="初一">初一</option>
+                            <option value="初二">初二</option>
+                            <option value="初三">初三</option>
+                            <option value="高一">高一</option>
+                            <option value="高二">高二</option>
+                            <option value="高三">高三</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">科目</label>
+                        <select class="form-select" id="examSubject"><option value="数学">数学</option><option value="语文">语文</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">题型</label>
+                        <select class="form-select" id="examTypeSelect" onchange="addTypeTag()">
+                            <option value="">-- 点击添加题型 --</option>
+                            <option value="分解组成">分解与组成</option>
+                            <option value="口算题">口算题</option>
+                            <option value="计算题">计算题</option>
+                            <option value="填空题">填空题</option>
+                            <option value="判断题">判断题</option>
+                            <option value="选择题">选择题</option>
+                            <option value="应用题">应用题</option>
+                            <option value="比大小">比大小</option>
+                        </select>
+                        <div id="typeTags" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+                        <div style="margin-top:4px;color:var(--text-secondary);font-size:12px">不选择则为综合练习</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">数量</label>
+                        <select class="form-select" id="examCount">
+                            <option value="5">5题</option>
+                            <option value="10" selected="">10题</option>
+                            <option value="15">15题</option>
+                            <option value="20">20题</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:16px;display:flex;gap:12px">
+                    <button class="btn btn-primary" onclick="generateExam()">生成试卷</button>
+                    <button class="btn btn-secondary" onclick="printExam()">打印试卷</button>
+                </div>
+            </div>
+            
+            <div class="card" id="examResult" style="display:none">
+                <div class="card-title">练习题</div>
+                <div id="examContent"></div>
+            </div>
+        </div>
+        
+        <!-- 拍照批改页面 -->
+        <div class="page" id="photoPage">
+            <div class="page-header">
+                <h2 class="page-title">拍照批改</h2>
+                <p class="page-subtitle">上传作业图片，AI自动批改并分析</p>
+            </div>
+            
+            <div class="card">
+                <div style="text-align:center;padding:40px;border:2px dashed var(--border);border-radius:12px;cursor:pointer" onclick="document.getElementById('photoInput').click()">
+                    <div style="font-size:48px;margin-bottom:12px">📷</div>
+                    <div style="color:var(--text-secondary)">点击上传或拖拽图片到此处</div>
+                    <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="handlePhoto(this)">
+                </div>
+            </div>
+            
+            <div class="card" id="photoResult" style="display:none">
+                <div class="card-title">批改结果</div>
+                <div id="photoContent"></div>
+            </div>
+        </div>
+        
+        <!-- 错题本页面 -->
+        <div class="page" id="wrongPage">
+            <div class="page-header">
+                <h2 class="page-title">错题本</h2>
+                <p class="page-subtitle">记录错题，智能分析薄弱知识点</p>
+            </div>
+            
+            <div class="stats-grid" id="wrongStats">
+            <div class="stat-card"><div class="stat-value">0</div><div class="stat-label">待复习错题</div></div>
+            </div>
+            <div class="card">
+                <div class="card-title">错题列表</div>
+                <div id="wrongList"></div>
+            </div>
+        </div>
+        
+        <!-- 学习计划页面 -->
+        <div class="page" id="planPage">
+            <div class="page-header">
+                <h2 class="page-title">学习计划</h2>
+                <p class="page-subtitle">AI生成个性化学习计划</p>
+            </div>
+            
+            <div class="card">
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                    <select class="form-select" id="planGrade" style="width:auto">
+                        <option value="小学一年级">一年级</option>
+                        <option value="小学二年级">二年级</option>
+                        <option value="小学三年级">三年级</option>
+                        <option value="小学四年级">四年级</option>
+                        <option value="小学五年级">五年级</option>
+                        <option value="小学六年级">六年级</option>
+                        <option value="初一">初一</option>
+                        <option value="初二">初二</option>
+                        <option value="初三">初三</option>
+                        <option value="高一">高一</option>
+                        <option value="高二">高二</option>
+                        <option value="高三">高三</option>
+                    </select>
+                    <select class="form-select" id="planSubject" style="width:auto">
+                        <option value="数学">数学</option>
+                        <option value="语文">语文</option>
+                        <option value="英语">英语</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="generatePlan()">生成计划</button>
+                </div>
+            </div>
+            
+            <div class="card" id="planResult" style="display:none">
+                <div id="planContent"></div>
+            </div>
+        </div>
+        
+        <!-- 诊断报告页面 -->
+        <div class="page" id="diagnosisPage">
+            <div class="page-header">
+                <h2 class="page-title">诊断报告</h2>
+                <p class="page-subtitle">学习数据分析与提升建议</p>
+            </div>
+            
+            <div class="stats-grid" id="diagnosisStats">
+            <div class="stat-card"><div class="stat-value">0</div><div class="stat-label">总题目数</div></div>
+            <div class="stat-card"><div class="stat-value">0%</div><div class="stat-label">正确率</div></div>
+            <div class="stat-card"><div class="stat-value">0</div><div class="stat-label">错题数</div></div>
+            </div>
+            <div class="card">
+                <div class="card-title">详细分析</div>
+                <div id="diagnosisContent"></div>
+            </div>
+        </div>
+        
+        <!-- 知识库页面 -->
+        <div class="page" id="knowledgePage">
+            <div class="page-header">
+                <h2 class="page-title">知识库</h2>
+                <p class="page-subtitle">管理学习资料和知识点</p>
+            </div>
+            
+            <div class="card">
+                <div style="display:flex;gap:12px;margin-bottom:16px">
+                    <button class="btn btn-primary" onclick="document.getElementById('kbInput').click()">上传资料</button>
+                    <input type="file" id="kbInput" accept=".pdf,.txt,.docx,.pptx" style="display:none" onchange="uploadKnowledge(this)">
+                </div>
+                <div id="knowledgeList"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
