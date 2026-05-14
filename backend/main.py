@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import random
 import calendar
 from collections import defaultdict
+from database import db
 
 app = FastAPI(title="家庭教育AI辅导系统")
 
@@ -551,15 +552,29 @@ async def app_js():
 
 @app.get("/api/children")
 async def get_children():
-    return {"children": children_data}
+    children = db.get_children()
+    return {"children": children}
+
+@app.post("/api/children")
+async def add_child(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    grade = data.get("grade", "")
+    avatar = data.get("avatar", "🧒")
+    
+    if not name or not grade:
+        raise HTTPException(status_code=400, detail="姓名和年级不能为空")
+    
+    child = db.add_child(name, grade, avatar)
+    return {"success": True, "child": child}
 
 @app.put("/api/children/{child_id}")
 async def update_child(child_id: int, request: Request):
     data = await request.json()
-    for child in children_data:
-        if child["id"] == child_id:
-            child.update(data)
-            return {"success": True, "child": child}
+    success = db.update_child(child_id, **data)
+    if success:
+        child = db.get_child(child_id)
+        return {"success": True, "child": child}
     raise HTTPException(status_code=404, detail="未找到该孩子")
 
 @app.get("/api/models/list")
@@ -574,23 +589,30 @@ async def get_models():
 
 @app.get("/api/diagnosis")
 async def get_diagnosis(child_id: int = 1):
-    progress = learning_progress[child_id]
-    total = progress["total_questions"]
-    correct = progress["correct_questions"]
+    child = db.get_child(child_id)
+    if not child:
+        return {"error": "未找到孩子"}
+    
+    progress = db.get_learning_progress(child_id)
+    wrong = db.get_wrong_questions(child_id, reviewed=False)
+    achievements = db.get_achievements(child_id)
+    
+    total = progress.get("total_questions", 0)
+    correct = progress.get("correct_questions", 0)
     rate = f"{int(correct/total*100)}%" if total > 0 else "0%"
     
     return {
         "total_questions": total,
         "correct_rate": rate,
-        "wrong_count": len(wrong_questions[child_id]),
-        "study_time": progress["study_time"],
-        "topics_mastered": len(progress["completed_topics"]),
-        "weak_points": progress["weak_points"][-5:],
-        "strong_points": progress["strong_points"][-5:],
-        "achievements": progress["achievements"],
-        "points": next((c["points"] for c in children_data if c["id"] == child_id), 0),
-        "level": next((c["level"] for c in children_data if c["id"] == child_id), 1),
-        "streak": next((c["streak"] for c in children_data if c["id"] == child_id), 0)
+        "wrong_count": len(wrong),
+        "study_time": progress.get("study_time", 0),
+        "topics_mastered": len(progress.get("completed_topics", [])),
+        "weak_points": progress.get("weak_points", [])[-5:],
+        "strong_points": progress.get("strong_points", [])[-5:],
+        "achievements": achievements,
+        "points": child.get("points", 0),
+        "level": child.get("level", 1),
+        "streak": child.get("streak", 0)
     }
 
 @app.get("/api/time")
@@ -661,23 +683,20 @@ async def get_weather(city: str = "北京", tomorrow: bool = False):
 
 @app.get("/api/topics")
 async def get_topics():
-    """获取所有学习主题"""
-    return {"success": True, "topics": dict(topics)}
+    topics_list = db.get_topics()
+    result = defaultdict(lambda: defaultdict(list))
+    for t in topics_list:
+        result[t["subject"]][t["grade"]].append(t["name"])
+    return {"success": True, "topics": dict(result)}
 
 @app.get("/api/topics/{subject}/{grade}")
 async def get_grade_topics(subject: str, grade: str):
-    """获取特定年级的主题"""
-    grade_topics = topics.get(subject, {}).get(grade, [])
-    return {"success": True, "topics": grade_topics}
+    topics_list = db.get_topics(subject, grade)
+    return {"success": True, "topics": [t["name"] for t in topics_list]}
 
 @app.get("/api/poems")
 async def get_poems(category: str = None, difficulty: int = None):
-    """获取古诗词"""
-    poems = poems_db
-    if category:
-        poems = [p for p in poems if p["category"] == category]
-    if difficulty:
-        poems = [p for p in poems if p["difficulty"] == difficulty]
+    poems = db.get_poems(category, difficulty)
     return {"success": True, "poems": poems, "total": len(poems)}
 
 @app.get("/api/knowledge")
@@ -713,69 +732,75 @@ async def generate_exam(request: Request):
 
 @app.post("/api/exam/submit")
 async def submit_exam(request: Request):
-    """提交答题结果"""
     data = await request.json()
     child_id = data.get("child_id", 1)
     answers = data.get("answers", [])
     
-    progress = learning_progress[child_id]
     correct_count = 0
+    total_questions = len(answers)
     
     for ans in answers:
         q_id = ans.get("question_id")
         user_ans = str(ans.get("answer", "")).strip()
         correct_ans = str(ans.get("correct_answer", "")).strip()
         
-        progress["total_questions"] += 1
-        
         if user_ans == correct_ans:
             correct_count += 1
-            progress["correct_questions"] += 1
         else:
-            wrong_questions[child_id].append({
-                "question_id": q_id,
-                "question": ans.get("question", ""),
-                "your_answer": user_ans,
-                "correct_answer": correct_ans,
-                "timestamp": datetime.now().isoformat()
-            })
+            db.add_wrong_question(
+                child_id=child_id,
+                question=ans.get("question", ""),
+                your_answer=user_ans,
+                correct_answer=correct_ans,
+                subject=ans.get("subject"),
+                topic=ans.get("topic"),
+                difficulty=ans.get("difficulty", 1)
+            )
     
-    # 更新成就
-    if progress["total_questions"] >= 1 and "first_question" not in progress["achievements"]:
-        progress["achievements"].append("first_question")
+    progress = db.get_learning_progress(child_id)
+    new_total = progress.get("total_questions", 0) + total_questions
+    new_correct = progress.get("correct_questions", 0) + correct_count
     
-    # 更新积分和等级
-    for child in children_data:
-        if child["id"] == child_id:
-            child["points"] += correct_count * 10
-            child["level"] = child["points"] // 500 + 1
-            break
+    achievements = progress.get("achievements", [])
+    if new_total >= 1 and "first_question" not in achievements:
+        achievements.append("first_question")
+        db.add_achievement(child_id, "first_question")
+    
+    db.update_learning_progress(
+        child_id,
+        total_questions=new_total,
+        correct_questions=new_correct,
+        achievements=achievements
+    )
+    
+    child = db.get_child(child_id)
+    if child:
+        new_points = child.get("points", 0) + correct_count * 10
+        new_level = new_points // 500 + 1
+        db.update_child(child_id, points=new_points, level=new_level)
     
     return {
         "success": True,
-        "total": len(answers),
+        "total": total_questions,
         "correct": correct_count,
-        "rate": f"{int(correct_count/len(answers)*100)}%" if answers else "0%"
+        "rate": f"{int(correct_count/total_questions*100)}%" if total_questions else "0%"
     }
 
 @app.get("/api/wrong-questions")
 async def get_wrong_questions(child_id: int = 1):
-    """获取错题本"""
+    questions = db.get_wrong_questions(child_id, reviewed=False)
     return {
         "success": True,
-        "questions": wrong_questions[child_id],
-        "total": len(wrong_questions[child_id])
+        "questions": questions,
+        "total": len(questions)
     }
 
 @app.post("/api/wrong-questions/review")
 async def review_wrong_question(request: Request):
-    """复习错题"""
     data = await request.json()
-    child_id = data.get("child_id", 1)
     q_id = data.get("question_id")
-    
-    # 模拟答对后从错题本移除
-    return {"success": True, "message": "复习完成！继续保持！"}
+    success = db.mark_wrong_question_reviewed(q_id)
+    return {"success": success, "message": "复习完成！继续保持！"}
 
 @app.get("/api/achievements")
 async def get_achievements():
@@ -784,38 +809,36 @@ async def get_achievements():
 
 @app.get("/api/achievements/{child_id}")
 async def get_child_achievements(child_id: int = 1):
-    """获取孩子已获得的成就"""
-    progress = learning_progress[child_id]
+    earned_ids = db.get_achievements(child_id)
     earned = []
-    for ach_id in progress["achievements"]:
+    for ach_id in earned_ids:
         if ach_id in achievements:
             earned.append({**achievements[ach_id], "id": ach_id})
     return {"success": True, "earned": earned, "total": len(achievements)}
 
 @app.get("/api/learning-path")
 async def get_learning_path(child_id: int = 1):
-    """获取学习路径"""
-    child = next((c for c in children_data if c["id"] == child_id), None)
+    child = db.get_child(child_id)
     if not child:
         return {"success": False, "error": "未找到孩子"}
     
-    grade = child["grade"]
-    subject = "数学"  # 默认
+    grade = child.get("grade", "小学一年级")
+    topics_list = db.get_topics("数学", grade)
     
     path = {
         "current": {
-            "level": child["level"],
-            "points": child["points"],
-            "next_level_points": (child["level"] + 1) * 500
+            "level": child.get("level", 1),
+            "points": child.get("points", 0),
+            "next_level_points": (child.get("level", 1) + 1) * 500
         },
         "milestones": [
-            {"name": "基础运算", "completed": True, "icon": "1️⃣"},
-            {"name": "进阶计算", "completed": child["level"] >= 2, "icon": "2️⃣"},
-            {"name": "应用题", "completed": child["level"] >= 4, "icon": "3️⃣"},
-            {"name": "综合提升", "completed": child["level"] >= 6, "icon": "4️⃣"},
-            {"name": "专家", "completed": child["level"] >= 10, "icon": "5️⃣"}
+            {"name": "基础运算", "completed": child.get("level", 1) >= 1, "icon": "1️⃣"},
+            {"name": "进阶计算", "completed": child.get("level", 1) >= 2, "icon": "2️⃣"},
+            {"name": "应用题", "completed": child.get("level", 1) >= 4, "icon": "3️⃣"},
+            {"name": "综合提升", "completed": child.get("level", 1) >= 6, "icon": "4️⃣"},
+            {"name": "专家", "completed": child.get("level", 1) >= 10, "icon": "5️⃣"}
         ],
-        "recommended_topics": topics.get(subject, {}).get(grade, [])[:3],
+        "recommended_topics": [t["name"] for t in topics_list[:3]],
         "daily_tasks": [
             {"name": "完成10道练习题", "done": False, "points": 20},
             {"name": "复习2道错题", "done": False, "points": 10},
@@ -827,38 +850,42 @@ async def get_learning_path(child_id: int = 1):
 
 @app.get("/api/parent-report")
 async def get_parent_report(child_id: int = 1):
-    """家长端学习报告"""
-    child = next((c for c in children_data if c["id"] == child_id), None)
+    child = db.get_child(child_id)
     if not child:
         return {"success": False, "error": "未找到孩子"}
     
-    progress = learning_progress[child_id]
-    total = progress["total_questions"]
-    correct = progress["correct_questions"]
+    progress = db.get_learning_progress(child_id)
+    wrong = db.get_wrong_questions(child_id)
+    records = db.get_study_records(child_id, days=7)
+    
+    total = progress.get("total_questions", 0)
+    correct = progress.get("correct_questions", 0)
+    
+    weekly_progress = []
+    weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    for i, day in enumerate(weekdays):
+        record = records[i] if i < len(records) else None
+        weekly_progress.append({
+            "day": day,
+            "questions": record.get("questions_count", random.randint(10, 30)) if record else random.randint(10, 30),
+            "rate": f"{random.randint(70, 95)}%"
+        })
     
     return {
         "success": True,
         "report": {
-            "child_name": child["name"],
-            "grade": child["grade"],
+            "child_name": child.get("name", ""),
+            "grade": child.get("grade", ""),
             "summary": {
                 "total_questions": total,
                 "correct_rate": f"{int(correct/total*100)}%" if total > 0 else "0%",
-                "study_days": child["streak"],
-                "total_points": child["points"],
-                "level": child["level"]
+                "study_days": child.get("streak", 0),
+                "total_points": child.get("points", 0),
+                "level": child.get("level", 1)
             },
-            "strengths": progress["strong_points"][-3:] or ["计算能力较好", "学习态度认真"],
-            "weaknesses": progress["weak_points"][-3:] or ["应用题需要加强", "需要提高细心程度"],
-            "weekly_progress": [
-                {"day": "周一", "questions": random.randint(10, 30), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周二", "questions": random.randint(10, 30), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周三", "questions": random.randint(10, 30), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周四", "questions": random.randint(10, 30), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周五", "questions": random.randint(10, 30), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周六", "questions": random.randint(5, 20), "rate": f"{random.randint(70, 95)}%"},
-                {"day": "周日", "questions": random.randint(5, 20), "rate": f"{random.randint(70, 95)}%"}
-            ],
+            "strengths": progress.get("strong_points", [])[-3:] or ["计算能力较好", "学习态度认真"],
+            "weaknesses": progress.get("weak_points", [])[-3:] or ["应用题需要加强", "需要提高细心程度"],
+            "weekly_progress": weekly_progress,
             "suggestions": [
                 "建议每天固定时间学习，养成良好习惯",
                 "错题本要及时复习，避免重复犯错",
@@ -973,24 +1000,29 @@ async def generate_plan(request: Request):
 
 @app.get("/api/kb/list")
 async def list_kb(child_id: int = 1):
-    return {"success": True, "files": knowledge_files.get(child_id, [])}
+    files = db.get_files(child_id)
+    return {"success": True, "files": files}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), child_id: int = 1):
-    """文件上传"""
-    file_location = DATA_DIR / "uploads" / file.filename
+    upload_dir = DATA_DIR / "uploads"
+    upload_dir.mkdir(exist_ok=True)
+    
+    file_location = upload_dir / file.filename
+    content = await file.read()
+    
     with open(file_location, "wb") as f:
-        content = await file.read()
         f.write(content)
     
-    if child_id not in knowledge_files:
-        knowledge_files[child_id] = []
+    file_type = file.filename.split('.')[-1] if '.' in file.filename else 'unknown'
     
-    knowledge_files[child_id].append({
-        "filename": file.filename,
-        "text_len": len(content),
-        "uploaded_at": datetime.now().isoformat()
-    })
+    db.add_file(
+        child_id=child_id,
+        filename=file.filename,
+        file_path=str(file_location),
+        file_size=len(content),
+        file_type=file_type
+    )
     
     return {"success": True, "message": "上传成功"}
 
